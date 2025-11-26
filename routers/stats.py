@@ -1,12 +1,13 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from sqlalchemy import select, func, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_async_session
 from models import Task
 from routers.tasks import valid_quadrants
+from schemas import TimingStatsResponse
 
 router = APIRouter(
     prefix="/stats",
@@ -34,18 +35,31 @@ async def get_tasks_stats(db: AsyncSession = Depends(get_async_session)) -> dict
         },
     }
 
-@router.get("/deadlines")
-async def get_deadlines(db: AsyncSession = Depends(get_async_session)) -> list:
-    result = await db.execute(select(Task).where((Task.completed == False) & (Task.deadline_at != None)))
-    tasks = result.scalars().all()
+@router.get("/deadlines", response_model=TimingStatsResponse)
+async def get_deadlines(db: AsyncSession = Depends(get_async_session)) -> TimingStatsResponse:
+    now_utc = datetime.now(timezone.utc)
 
-    response_data = []
-    for task in tasks:
-        response_data.append({
-            "title": task.title,
-            "description": task.description,
-            "deadline_at": task.deadline_at,
-            "delta": (task.deadline_at - datetime.now()).days,
-        })
+    statement = select(
+        func.sum(
+            case(((Task.completed == True) & (Task.completed_at <= Task.deadline_at), 1), else_=0)
+        ).label("completed_on_time"),
+        func.sum(
+            case(((Task.completed == True) & (Task.completed_at > Task.deadline_at), 1), else_=0)
+        ).label("completed_late"),
+        func.sum(
+            case(((Task.completed == False) & (Task.deadline_at != None) & (Task.deadline_at > now_utc), 1), else_=0)
+        ).label("on_plan_pending"),
+        func.sum(
+            case(((Task.completed == False) & (Task.deadline_at != None) & (Task.deadline_at <= now_utc), 1), else_=0)
+        ).label("overdue_pending"),
+    ).select_from(Task)
 
-    return response_data
+    result = await db.execute(statement)
+    stats_row = result.one()
+
+    return TimingStatsResponse(
+        completed_on_time=stats_row.completed_on_time or 0,
+        completed_late=stats_row.completed_late or 0,
+        on_plan_pending=stats_row.on_plan_pending or 0,
+        overtime_pending=stats_row.overdue_pending or 0,
+    )
