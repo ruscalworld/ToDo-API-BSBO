@@ -5,7 +5,8 @@ from sqlalchemy import select, func, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_async_session
-from models import Task
+from dependencies import get_current_user
+from models import Task, User, UserRole
 from routers.tasks import valid_quadrants
 from schemas import TimingStatsResponse
 
@@ -15,8 +16,12 @@ router = APIRouter(
 )
 
 @router.get("/")
-async def get_tasks_stats(db: AsyncSession = Depends(get_async_session)) -> dict:
-    result = await db.execute(select(Task))
+async def get_tasks_stats(db: AsyncSession = Depends(get_async_session), current_user: User = Depends(get_current_user)) -> dict:
+    if current_user.role == UserRole.ADMIN.value:
+        result = await db.execute(select(Task))
+    else:
+        result = await db.execute(select(Task).where(Task.user_id == current_user.id))
+
     tasks = result.scalars().all()
 
     def count_by(predicate) -> int:
@@ -36,7 +41,7 @@ async def get_tasks_stats(db: AsyncSession = Depends(get_async_session)) -> dict
     }
 
 @router.get("/deadlines", response_model=TimingStatsResponse)
-async def get_deadlines(db: AsyncSession = Depends(get_async_session)) -> TimingStatsResponse:
+async def get_deadlines(db: AsyncSession = Depends(get_async_session), current_user: User = Depends(get_current_user)) -> TimingStatsResponse:
     now_utc = datetime.now(timezone.utc)
 
     statement = select(
@@ -53,6 +58,9 @@ async def get_deadlines(db: AsyncSession = Depends(get_async_session)) -> Timing
             case(((Task.completed == False) & (Task.deadline_at != None) & (Task.deadline_at <= now_utc), 1), else_=0)
         ).label("overdue_pending"),
     ).select_from(Task)
+
+    if current_user.role != UserRole.ADMIN.value:
+        statement = statement.where(Task.user_id == current_user.id)
 
     result = await db.execute(statement)
     stats_row = result.one()
