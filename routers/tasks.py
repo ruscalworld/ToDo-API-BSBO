@@ -3,7 +3,7 @@ from typing import List
 
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi import Response
-from sqlalchemy import select, Sequence
+from sqlalchemy import select, Sequence, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette import status
 
@@ -70,6 +70,16 @@ async def search_tasks(q: str, db: AsyncSession = Depends(get_async_session)) ->
     result = await db.execute(select(Task).where(
         (Task.title.ilike(keyword)) | (Task.description.ilike(keyword))
     ))
+    tasks = result.scalars().all()
+
+    return tasks
+
+@router.get("/today", response_model=List[TaskResponse])
+async def get_today_tasks(db: AsyncSession = Depends(get_async_session)) -> Sequence[Task]:
+    today = datetime.date.today()
+    result = await db.execute(
+        select(Task).where((Task.deadline_at != None) & (func.date(Task.deadline_at) == today))
+    )
     tasks = result.scalars().all()
 
     return tasks
