@@ -20,20 +20,6 @@ router = APIRouter(
     responses={404: {"description": "Task not found"}},
 )
 
-def get_quadrant(is_important: bool, is_urgent: bool) -> str:
-    if is_important and is_urgent:
-        return "Q1"
-    elif is_important and not is_urgent:
-        return "Q2"
-    elif not is_important and is_urgent:
-        return "Q3"
-    else:
-        return "Q4"
-
-def get_urgent(deadline_at: datetime.datetime) -> bool:
-    diff = deadline_at - datetime.datetime.now(tz=deadline_at.tzinfo)
-    return diff < datetime.timedelta(days=3)
-
 @router.get("/", response_model=List[TaskResponse])
 async def get_all_tasks(db: AsyncSession = Depends(get_async_session)) -> Sequence[Task]:
     result = await db.execute(select(Task))
@@ -46,8 +32,6 @@ async def create_task(task: TaskCreate, db: AsyncSession = Depends(get_async_ses
         title=task.title,
         description=task.description,
         is_important=task.is_important,
-        is_urgent=get_urgent(task.deadline_at),
-        quadrant=get_quadrant(task.is_important, get_urgent(task.deadline_at)),
         completed=False,
         deadline_at=task.deadline_at,
     )
@@ -59,15 +43,18 @@ async def create_task(task: TaskCreate, db: AsyncSession = Depends(get_async_ses
     return new_task
 
 @router.get("/quadrant/{quadrant}", response_model=List[TaskResponse])
-async def get_tasks_by_quadrant(quadrant: str, db: AsyncSession = Depends(get_async_session)) -> Sequence[Task]:
+async def get_tasks_by_quadrant(quadrant: str, db: AsyncSession = Depends(get_async_session)) -> List[Task]:
     if quadrant not in valid_quadrants:
         raise HTTPException(
             status_code=400,
             detail=f"Неверный квадрант. Используйте: {', '.join(valid_quadrants)}",
         )
 
-    result = await db.execute(select(Task).where(Task.quadrant == quadrant))
-    tasks = result.scalars().all()
+    result = await db.execute(select(Task))
+    all_tasks = result.scalars().all()
+
+    # Фильтруем по computed полю quadrant в Python
+    tasks = [task for task in all_tasks if task.quadrant == quadrant]
 
     return tasks
 
@@ -81,7 +68,7 @@ async def search_tasks(q: str, db: AsyncSession = Depends(get_async_session)) ->
 
     keyword = f'%{q.lower()}%'
     result = await db.execute(select(Task).where(
-        (Task.title.ilike(keyword)) | ((Task.description.ilike(keyword)))
+        (Task.title.ilike(keyword)) | (Task.description.ilike(keyword))
     ))
     tasks = result.scalars().all()
 
@@ -117,10 +104,6 @@ async def update_task(task_id: int, task_update: TaskUpdate, db: AsyncSession = 
     for field, value in update_data.items():
         setattr(task, field, value)
 
-    if "is_important" in update_data or "deadline" in update_data:
-        task.is_urgent = get_urgent(update_data["deadline_at"])
-        task.quadrant = get_quadrant(task.is_important, task.is_urgent)
-
     await db.commit()
     await db.refresh(task)
 
@@ -134,7 +117,7 @@ async def complete_task(task_id: int, db: AsyncSession = Depends(get_async_sessi
         raise HTTPException(status_code=404, detail="Задача не найдена")
 
     task.completed = True
-    task.completed_at = datetime.now()
+    task.completed_at = datetime.datetime.now()
 
     await db.commit()
     await db.refresh(task)

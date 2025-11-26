@@ -78,6 +78,10 @@ class TaskResponse(TaskBase):
         None,
         description="Дедлайн по задаче",
     )
+    days_remaining: Optional[int] = Field(
+        ...,
+        description="Количество дней до дедлайна",
+    )
     created_at: datetime = Field(
         ...,
         description="Дата и время создания задачи",
