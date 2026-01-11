@@ -1,43 +1,38 @@
-from fastapi import Depends, HTTPException, status, Header
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from database import get_async_session
 from models import User, UserRole
-import os
-from dotenv import load_dotenv
+from auth_utils import decode_access_token
+from typing import Optional
 
-load_dotenv()
-
-MANAGEMENT_KEY = os.getenv("MANAGEMENT_KEY")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v3/auth/login")
 
 
-async def verify_management_key(x_management_key: str = Header(..., alias="X-Management-Key")) -> None:
-    if x_management_key != MANAGEMENT_KEY:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Неверный ключ управления"
-        )
+# Аутентификация
+async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_async_session)) -> User:
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Не удалось проверить учетные данные",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
+    payload = decode_access_token(token)
+    if payload is None:
+        raise credentials_exception
 
-async def get_current_user(
-    x_user_id: str = Header(..., alias="X-User-Id"),
-    db: AsyncSession = Depends(get_async_session),
-    _: None = Depends(verify_management_key)
-) -> User:
+    user_id: Optional[int] = payload.get("sub")
+    if user_id is None:
+        raise credentials_exception
+
     result = await db.execute(
-        select(User).where(User.external_id == x_user_id)
+        select(User).where(User.id == int(user_id))
     )
 
     user = result.scalar_one_or_none()
-
     if user is None:
-        user = User(
-            external_id=x_user_id,
-            role=UserRole.USER.value,
-        )
-        db.add(user)
-        await db.commit()
-        await db.refresh(user)
+        raise credentials_exception
 
     return user
 
