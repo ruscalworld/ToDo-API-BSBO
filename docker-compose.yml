@@ -1,4 +1,11 @@
 services:
+  app:
+    image: ghcr.io/ruscalworld/todo-api-bsbo:main
+    restart: always
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:example@db/postgres
+      SECRET_KEY: changeme
+
   db:
     image: postgres
     restart: always
