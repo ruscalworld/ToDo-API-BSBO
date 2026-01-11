@@ -16,21 +16,11 @@ class User(Base):
         index=True,
         autoincrement=True,
     )
-    nickname = Column(
-        String(50),
-        unique=True,
-        nullable=False,
-        index=True,
-    )
-    email = Column(
-        String(100),
-        unique=True,
-        nullable=False,
-        index=True,
-    )
-    hashed_password = Column(
+    external_id = Column(
         String(255),
+        unique=True,
         nullable=False,
+        index=True,
     )
     role = Column(
         String(20),
@@ -45,4 +35,4 @@ class User(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<User(id={self.id}, nickname='{self.nickname}', role='{self.role}')>"
+        return f"<User(id={self.id}, external_id='{self.external_id}', role='{self.role}')>"
